@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Review</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #eef0f4;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --muted: #5d6679;
+    --line: #dde1e8;
+    --accent: #3b5bdb;
+    --accent-ink: #ffffff;
+    --accent-soft: #e7ecff;
+    --hl: #fff1b8;
+    --hl-strong: #ffd965;
+    --hl-ext: #dbeafe;
+    --hl-ext-strong: #93c5fd;
+    --danger: #c92a2a;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  button {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: #b8bfcc; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.link { border: none; background: none; padding: 2px 4px; color: var(--accent); }
+  button.link.danger { color: var(--danger); }
+  input[type=text], textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #fff;
+  }
+  input[type=text]:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+  header.app {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  header.app h1 { font-size: 17px; margin: 0; margin-right: auto; }
+  header.app label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  header.app input { width: 180px; }
+
+  nav.tabs { display: none; gap: 4px; padding: 8px 16px 0; }
+  nav.tabs button { border-radius: 8px 8px 0 0; border-bottom: none; }
+  nav.tabs button[aria-selected=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  main {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 340px;
+    gap: 12px;
+    padding: 12px 16px 16px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .panel > header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel > header h2 { font-size: 14px; margin: 0; }
+  .panel > header .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel > header .titles { min-width: 0; margin-right: auto; }
+  .panel-body { flex: 1; overflow: auto; background: #f6f7f9; position: relative; }
+
+  .drop {
+    margin: 16px;
+    border: 2px dashed #c3c9d4;
+    border-radius: var(--radius);
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--muted);
+    background: #fff;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; color: var(--ink); font-size: 15px; margin-bottom: 6px; }
+  .drop p { margin: 0 0 14px; }
+
+  .page {
+    background: #fff;
+    max-width: 816px;
+    margin: 16px auto;
+    padding: 48px 56px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12);
+    font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .page p { margin: 0 0 8px; min-height: 1em; }
+  .page .h1 { font-size: 22px; font-weight: 700; margin: 16px 0 8px; }
+  .page .h2 { font-size: 18px; font-weight: 700; margin: 14px 0 6px; }
+  .page .h3 { font-size: 16px; font-weight: 700; margin: 12px 0 6px; }
+  .page .title { font-size: 26px; font-weight: 700; margin: 0 0 12px; }
+  .page .list { padding-left: 24px; position: relative; }
+  .page .list::before { content: "•"; position: absolute; left: 8px; }
+  .page table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; white-space: normal; }
+  .page td { border: 1px solid #c9ced8; padding: 4px 8px; vertical-align: top; }
+  .page td p { margin: 0 0 4px; }
+  .page .b { font-weight: 700; }
+  .page .i { font-style: italic; }
+  .page .u { text-decoration: underline; }
+  #docView .page { cursor: text; }
+  mark.hl { background: var(--hl); color: inherit; border-bottom: 2px solid var(--hl-strong); cursor: pointer; }
+  mark.hl.ext { background: var(--hl-ext); border-bottom-color: var(--hl-ext-strong); }
+  mark.hl.multi { background: var(--hl-strong); }
+  mark.hl.ext.multi { background: var(--hl-ext-strong); }
+  mark.hl.active { outline: 2px solid var(--accent); outline-offset: 0; }
+  mark.hl.pending { background: var(--accent-soft); border-bottom: 2px solid var(--accent); }
+
+  .pdf-pages { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .pdf-pages canvas { width: 100%; max-width: 816px; height: auto; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+  #floatBtn {
+    position: fixed;
+    z-index: 50;
+    display: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  }
+
+  .composer { flex: none; padding: 12px 14px; border-bottom: 1px solid var(--line); background: #fff; display: flex; flex-direction: column; gap: 8px; }
+  .composer .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .quote {
+    border-left: 3px solid var(--hl-strong);
+    padding: 2px 8px;
+    color: var(--muted);
+    font-size: 13px;
+    max-height: 4.5em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  .quote.ext { border-left-color: var(--hl-ext-strong); }
+  .composer .row { display: flex; gap: 8px; align-items: center; }
+  .composer .row label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .composer textarea { min-height: 70px; resize: vertical; }
+  .composer .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .list-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  #commentList { padding: 4px 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .card .who { display: flex; align-items: center; gap: 8px; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; flex: none;
+  }
+  .card.ext .avatar { background: #64748b; }
+  .card .name { font-weight: 600; }
+  .card .date { color: var(--muted); font-size: 12px; }
+  .badge { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+  .card.ext .badge { background: #eef1f5; color: #475569; }
+  .card .text { white-space: pre-wrap; word-wrap: break-word; }
+  .card .tools { display: flex; gap: 4px; justify-content: flex-end; }
+  .empty { color: var(--muted); text-align: center; padding: 20px 8px; font-size: 13px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: #1d2433; color: #fff; padding: 10px 16px; border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.25); display: none; z-index: 100; max-width: calc(100% - 32px);
+  }
+  #toast.error { background: var(--danger); }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  @media (max-width: 1099px) {
+    nav.tabs { display: flex; }
+    main { grid-template-columns: minmax(0, 1fr) 320px; padding-top: 0; }
+    main:not([data-view=source]) #sourcePanel { display: none; }
+    main[data-view=source] #docPanel { display: none; }
+    nav.tabs .tab-comments { display: none; }
+  }
+  @media (max-width: 719px) {
+    header.app { padding: 10px 16px; gap: 10px; }
+    header.app input { width: 140px; }
+    main { grid-template-columns: minmax(0, 1fr); }
+    nav.tabs .tab-comments { display: block; }
+    main:not([data-view=comments]) #commentsPanel { display: none; }
+    main[data-view=comments] #docPanel { display: none; }
+    .page { padding: 24px 20px; margin: 12px; }
+  }
+</style>
+</head>
+<body>
+  <header class="app">
+    <h1>Document Review</h1>
+    <label>Your name <input type="text" id="myName" placeholder="e.g. Jane Smith" autocomplete="name"></label>
+    <button class="primary" id="exportBtn" disabled>Save Word document</button>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Panels">
+    <button role="tab" data-view="source" aria-selected="false">Source</button>
+    <button role="tab" data-view="doc" aria-selected="true">Customer document</button>
+    <button role="tab" data-view="comments" class="tab-comments" aria-selected="false">Comments <span class="count"></span></button>
+  </nav>
+
+  <main data-view="doc">
+    <section class="panel" id="sourcePanel" aria-labelledby="sourceTitle">
+      <header>
+        <div class="titles">
+          <h2 id="sourceTitle">Source document</h2>
+          <div class="sub" id="sourceName">Your original, for reference (PDF or Word)</div>
+        </div>
+        <button id="sourceReplace" hidden>Replace</button>
+      </header>
+      <div class="panel-body" id="sourceBody">
+        <div class="drop" data-target="source">
+          <strong>Add your source document</strong>
+          <p>Drop a PDF or Word file here. It's shown for comparison only.</p>
+          <button class="primary pick">Choose file</button>
+        </div>
+      </div>
+      <input type="file" id="sourceFile" class="sr-only" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+    </section>
+
+    <section class="panel" id="docPanel" aria-labelledby="docTitle">
+      <header>
+        <div class="titles">
+          <h2 id="docTitle">Customer document</h2>
+          <div class="sub" id="docName">Comments are saved into this Word file</div>
+        </div>
+        <button id="docReplace" hidden>Replace</button>
+      </header>
+      <div class="panel-body" id="docBody">
+        <div class="drop" data-target="doc">
+          <strong>Add the customer's Word document</strong>
+          <p>Drop a .docx file here. This is the file your comments will be saved into.</p>
+          <button class="primary pick">Choose file</button>
+        </div>
+      </div>
+      <input type="file" id="docFile" class="sr-only" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+    </section>
+
+    <aside class="panel" id="commentsPanel" aria-labelledby="commentsTitle">
+      <header>
+        <div class="titles">
+          <h2 id="commentsTitle">Comments</h2>
+          <div class="sub" id="commentSummary">No document loaded</div>
+        </div>
+      </header>
+      <form class="composer" id="composer">
+          <p class="hint" id="composerHint">Select text in the customer document to comment on it.</p>
+          <div class="quote" id="composerQuote" hidden></div>
+          <div class="row">
+            <label for="composerAuthor">Comment as</label>
+            <input type="text" id="composerAuthor" list="authorList" placeholder="Name">
+          </div>
+          <textarea id="composerText" placeholder="Write a comment…" disabled></textarea>
+          <div class="actions">
+            <button type="button" id="composerCancel" hidden>Cancel</button>
+            <button type="submit" class="primary" id="composerAdd" disabled>Add comment</button>
+          </div>
+      </form>
+      <div class="panel-body">
+        <div class="list-head"><span>In this document</span><span id="listCount"></span></div>
+        <div id="commentList"><div class="empty">No comments yet.</div></div>
+      </div>
+    </aside>
+  </main>
+
+  <datalist id="authorList"></datalist>
+  <button id="floatBtn" class="primary" type="button">Comment</button>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const PKG = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  const CT = 'http://schemas.openxmlformats.org/package/2006/content-types';
+  const XMLNS = 'http://www.w3.org/XML/1998/namespace';
+  const REL_DOC = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
+  const REL_COMMENTS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
+  const COMMENTS_CT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
+  const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const GENERIC_AUTHOR = 'Review Team';
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  const $ = id => document.getElementById(id);
+  const mainEl = document.querySelector('main');
+
+  // ---------- storage (IndexedDB; the app still works if it is unavailable) ----------
+  const store = (() => {
+    let dbp;
+    function db() {
+      if (!dbp) dbp = new Promise((res, rej) => {
+        const r = indexedDB.open('word-review', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      return dbp;
+    }
+    async function get(k) {
+      try {
+        const d = await db();
+        return await new Promise((res, rej) => {
+          const q = d.transaction('kv').objectStore('kv').get(k);
+          q.onsuccess = () => res(q.result);
+          q.onerror = () => rej(q.error);
+        });
+      } catch { return undefined; }
+    }
+    async function set(k, v) {
+      try {
+        const d = await db();
+        await new Promise((res, rej) => {
+          const tx = d.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(v, k);
+          tx.oncomplete = res;
+          tx.onerror = () => rej(tx.error);
+        });
+        return true;
+      } catch { return false; }
+    }
+    return { get, set };
+  })();
+
+  // ---------- state ----------
+  const state = {
+    doc: null,        // { name, size, buffer, zip, mainPath, blocks, texts, existing: [] }
+    comments: [],     // new comments: { id, author, initials, text, created, start:{ti,off}, end:{ti,off}, quote }
+    pending: null,    // anchor awaiting a comment
+    activeId: null,
+    editingId: null,
+  };
+  let tSpans = [];
+
+  // ---------- helpers ----------
+  function toast(msg, isError) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = isError ? 'error' : '';
+    t.style.display = 'block';
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+  function initialsOf(name) {
+    return name.trim().split(/\s+/).filter(Boolean).slice(0, 3).map(w => w[0].toUpperCase()).join('') || '?';
+  }
+  function fmtDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  function kids(el) { return el ? Array.from(el.children) : []; }
+  function kid(el, name) { return kids(el).find(c => c.namespaceURI === W && c.localName === name); }
+  function wAttr(el, name) { return el.getAttributeNS(W, name) ?? el.getAttribute('w:' + name); }
+  function parseXml(str) {
+    const d = new DOMParser().parseFromString(str, 'application/xml');
+    if (d.getElementsByTagName('parsererror').length) throw new Error('Could not read the document XML.');
+    return d;
+  }
+  function serialize(d) {
+    let s = new XMLSerializer().serializeToString(d);
+    if (!s.startsWith('<?xml')) s = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + s;
+    return s;
+  }
+  function dirOf(path) { const i = path.lastIndexOf('/'); return i < 0 ? '' : path.slice(0, i + 1); }
+  function resolvePath(base, target) {
+    if (target.startsWith('/')) return target.slice(1);
+    const parts = (dirOf(base) + target).split('/');
+    const out = [];
+    for (const p of parts) { if (p === '..') out.pop(); else if (p !== '.') out.push(p); }
+    return out.join('/');
+  }
+  function relsPathFor(part) { return dirOf(part) + '_rels/' + part.slice(dirOf(part).length) + '.rels'; }
+
+  // ---------- .docx reading ----------
+  async function openDocx(buffer) {
+    const zip = await JSZip.loadAsync(buffer);
+    let mainPath = 'word/document.xml';
+    const rootRels = zip.file('_rels/.rels');
+    if (rootRels) {
+      const rd = parseXml(await rootRels.async('string'));
+      const rel = Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).find(r => r.getAttribute('Type') === REL_DOC);
+      if (rel) mainPath = resolvePath('', rel.getAttribute('Target'));
+    }
+    const main = zip.file(mainPath);
+    if (!main) throw new Error('This file does not look like a Word document.');
+    const xml = parseXml(await main.async('string'));
+    const commentsPath = await findCommentsPath(zip, mainPath);
+    return { zip, mainPath, xml, commentsPath };
+  }
+
+  async function findCommentsPath(zip, mainPath) {
+    const relsFile = zip.file(relsPathFor(mainPath));
+    if (!relsFile) return null;
+    const rd = parseXml(await relsFile.async('string'));
+    const rel = Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).find(r => r.getAttribute('Type') === REL_COMMENTS);
+    return rel ? resolvePath(mainPath, rel.getAttribute('Target')) : null;
+  }
+
+  // Walks the document body in reading order. Every visible w:t gets an index (ti);
+  // the same walk runs again at save time, so indexes map back to the same XML nodes.
+  function walkDocument(xml) {
+    const tEls = [];
+    const paraOf = [];
+    let paraNo = 0;
+    const anchors = {};
+    const open = new Set();
+    const body = xml.getElementsByTagNameNS(W, 'body')[0];
+
+    function marker(el) {
+      const id = wAttr(el, 'id');
+      if (el.localName === 'commentRangeStart') open.add(id);
+      else if (el.localName === 'commentRangeEnd') open.delete(id);
+    }
+    function blocks(container) {
+      const out = [];
+      for (const el of kids(container)) {
+        if (el.namespaceURI !== W) continue;
+        switch (el.localName) {
+          case 'p': out.push(para(el)); break;
+          case 'tbl': out.push(table(el)); break;
+          case 'sdt': out.push(...blocks(kid(el, 'sdtContent'))); break;
+          case 'customXml': out.push(...blocks(el)); break;
+          case 'commentRangeStart': case 'commentRangeEnd': marker(el); break;
+        }
+      }
+      return out;
+    }
+    function table(tbl) {
+      const rows = kids(tbl).filter(r => r.namespaceURI === W && r.localName === 'tr')
+        .map(tr => kids(tr).filter(c => c.namespaceURI === W && c.localName === 'tc').map(tc => blocks(tc)));
+      return { type: 'table', rows };
+    }
+    function para(p) {
+      const pPr = kid(p, 'pPr');
+      const styleEl = kid(pPr, 'pStyle');
+      const style = styleEl ? (wAttr(styleEl, 'val') || '') : '';
+      const list = !!kid(pPr, 'numPr');
+      const items = [];
+      paraNo++;
+      inline(p, items);
+      return { type: 'p', style, list, items };
+    }
+    function inline(el, items) {
+      for (const c of kids(el)) {
+        if (c.namespaceURI !== W) continue;
+        switch (c.localName) {
+          case 'r': run(c, items); break;
+          case 'commentRangeStart': case 'commentRangeEnd': marker(c); break;
+          case 'hyperlink': case 'ins': case 'moveTo': case 'smartTag': case 'fldSimple':
+          case 'customXml': case 'dir': case 'bdo':
+            inline(c, items); break;
+          case 'sdt': inline(kid(c, 'sdtContent'), items); break;
+        }
+      }
+    }
+    function run(r, items) {
+      const rPr = kid(r, 'rPr');
+      const on = name => { const e = kid(rPr, name); if (!e) return false; const v = wAttr(e, 'val'); return v !== 'false' && v !== '0' && v !== 'none'; };
+      const fmt = { b: on('b'), i: on('i'), u: on('u') };
+      for (const c of kids(r)) {
+        if (c.namespaceURI !== W) continue;
+        if (c.localName === 't') {
+          const ti = tEls.length;
+          tEls.push(c);
+          paraOf.push(paraNo);
+          for (const id of open) {
+            if (!anchors[id]) anchors[id] = { start: { ti, off: 0 } };
+            anchors[id].end = { ti, off: c.textContent.length };
+          }
+          items.push({ kind: 't', ti, text: c.textContent, ...fmt });
+        } else if (c.localName === 'tab') items.push({ kind: 'tab' });
+        else if (c.localName === 'br' || c.localName === 'cr') items.push({ kind: 'br' });
+      }
+    }
+    const out = body ? blocks(body) : [];
+    return { blocks: out, tEls, paraOf, anchors };
+  }
+
+  async function readExistingComments(zip, commentsPath, anchors, texts, paraOf) {
+    if (!commentsPath || !zip.file(commentsPath)) return [];
+    const cx = parseXml(await zip.file(commentsPath).async('string'));
+    return Array.from(cx.getElementsByTagNameNS(W, 'comment')).map(c => {
+      const id = wAttr(c, 'id');
+      const text = Array.from(c.getElementsByTagNameNS(W, 'p'))
+        .map(p => Array.from(p.getElementsByTagNameNS(W, 't')).map(t => t.textContent).join('')).join('\n');
+      const a = anchors[id];
+      return {
+        id: 'ext-' + id,
+        ext: true,
+        author: wAttr(c, 'author') || 'Unknown',
+        initials: wAttr(c, 'initials') || initialsOf(wAttr(c, 'author') || '?'),
+        created: wAttr(c, 'date'),
+        text,
+        start: a ? a.start : null,
+        end: a ? a.end : null,
+        quote: a ? quoteOf(a.start, a.end, texts, paraOf) : '',
+      };
+    });
+  }
+
+  function quoteOf(start, end, texts, paraOf) {
+    let s = '';
+    for (let i = start.ti; i <= end.ti; i++) {
+      const t = texts[i] || '';
+      if (i > start.ti && paraOf[i] !== paraOf[i - 1]) s += ' ';
+      s += t.slice(i === start.ti ? start.off : 0, i === end.ti ? end.off : t.length);
+    }
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  // ---------- rendering ----------
+  function renderBlocks(blocks, parent, spans) {
+    for (const b of blocks) {
+      if (b.type === 'table') {
+        const table = document.createElement('table');
+        for (const row of b.rows) {
+          const tr = table.insertRow();
+          for (const cell of row) renderBlocks(cell, tr.insertCell(), spans);
+        }
+        parent.appendChild(table);
+        continue;
+      }
+      const p = document.createElement('p');
+      const m = /^(heading|berschrift|titre)\s*(\d)/i.exec(b.style);
+      if (m) p.className = 'h' + Math.min(+m[2], 3);
+      else if (/^title$/i.test(b.style)) p.className = 'title';
+      if (b.list) p.classList.add('list');
+      for (const it of b.items) {
+        if (it.kind === 'tab') p.appendChild(document.createTextNode('\t'));
+        else if (it.kind === 'br') p.appendChild(document.createElement('br'));
+        else {
+          const s = document.createElement('span');
+          s.textContent = it.text;
+          if (it.b) s.classList.add('b');
+          if (it.i) s.classList.add('i');
+          if (it.u) s.classList.add('u');
+          if (spans) { s.dataset.ti = it.ti; spans[it.ti] = s; }
+          p.appendChild(s);
+        }
+      }
+      parent.appendChild(p);
+    }
+  }
+
+  function allComments() { return state.doc ? [...state.doc.existing, ...state.comments] : []; }
+
+  function paintHighlights() {
+    if (!state.doc) return;
+    const texts = state.doc.texts;
+    const byTi = new Map();
+    const push = (c, cls) => {
+      if (!c.start) return;
+      for (let ti = c.start.ti; ti <= c.end.ti; ti++) {
+        const a = ti === c.start.ti ? c.start.off : 0;
+        const b = ti === c.end.ti ? c.end.off : texts[ti].length;
+        if (b <= a) continue;
+        if (!byTi.has(ti)) byTi.set(ti, []);
+        byTi.get(ti).push({ a, b, id: c.id, cls });
+      }
+    };
+    for (const c of allComments()) push(c, c.ext ? 'ext' : '');
+    if (state.pending) push({ ...state.pending, id: 'pending' }, 'pending');
+
+    tSpans.forEach((span, ti) => {
+      const iv = byTi.get(ti);
+      const text = texts[ti];
+      if (!iv) {
+        if (span.childElementCount) span.textContent = text;
+        return;
+      }
+      const cuts = [...new Set([0, text.length, ...iv.flatMap(x => [x.a, x.b])])].sort((x, y) => x - y);
+      span.textContent = '';
+      for (let k = 0; k < cuts.length - 1; k++) {
+        const x = cuts[k], y = cuts[k + 1];
+        const piece = text.slice(x, y);
+        const cover = iv.filter(v => v.a <= x && v.b >= y);
+        if (!cover.length) { span.appendChild(document.createTextNode(piece)); continue; }
+        const mk = document.createElement('mark');
+        mk.textContent = piece;
+        mk.className = 'hl';
+        const pending = cover.find(v => v.cls === 'pending');
+        if (pending) mk.classList.add('pending');
+        else {
+          if (cover.every(v => v.cls === 'ext')) mk.classList.add('ext');
+          if (cover.length > 1) mk.classList.add('multi');
+          if (cover.some(v => v.id === state.activeId)) mk.classList.add('active');
+        }
+        mk.dataset.ids = cover.map(v => v.id).join(' ');
+        span.appendChild(mk);
+      }
+    });
+  }
+
+  function renderComments() {
+    const list = $('commentList');
+    list.textContent = '';
+    const all = allComments().slice().sort((a, b) => {
+      const pa = a.start ? a.start.ti * 1e6 + a.start.off : Infinity;
+      const pb = b.start ? b.start.ti * 1e6 + b.start.off : Infinity;
+      return pa - pb;
+    });
+    const nNew = state.comments.length, nExt = state.doc ? state.doc.existing.length : 0;
+    $('listCount').textContent = all.length ? String(all.length) : '';
+    document.querySelector('nav.tabs .count').textContent = all.length ? `(${all.length})` : '';
+    $('commentSummary').textContent = !state.doc ? 'No document loaded'
+      : `${nNew} new · ${nExt} already in document`;
+    $('exportBtn').disabled = !state.doc;
+
+    if (!all.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = state.doc ? 'No comments yet. Select text in the document to add one.' : 'Load the customer document to start.';
+      list.appendChild(e);
+      return;
+    }
+    for (const c of all) list.appendChild(commentCard(c));
+  }
+
+  function commentCard(c) {
+    const card = document.createElement('article');
+    card.className = 'card' + (c.ext ? ' ext' : '') + (c.id === state.activeId ? ' active' : '');
+    card.dataset.id = c.id;
+
+    const who = document.createElement('div');
+    who.className = 'who';
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = c.initials;
+    const nm = document.createElement('div');
+    const n = document.createElement('div'); n.className = 'name'; n.textContent = c.author;
+    const d = document.createElement('div'); d.className = 'date'; d.textContent = fmtDate(c.created);
+    nm.append(n, d);
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = c.ext ? 'In document' : 'New';
+    who.append(av, nm, badge);
+    card.appendChild(who);
+
+    if (c.quote) {
+      const q = document.createElement('div');
+      q.className = 'quote' + (c.ext ? ' ext' : '');
+      q.textContent = c.quote;
+      card.appendChild(q);
+    }
+
+    if (state.editingId === c.id) {
+      const a = document.createElement('input');
+      a.type = 'text'; a.value = c.author; a.setAttribute('list', 'authorList'); a.setAttribute('aria-label', 'Author');
+      const t = document.createElement('textarea');
+      t.value = c.text; t.setAttribute('aria-label', 'Comment');
+      const tools = document.createElement('div'); tools.className = 'tools';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+      const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
+      cancel.onclick = e => { e.stopPropagation(); state.editingId = null; renderComments(); };
+      save.onclick = e => {
+        e.stopPropagation();
+        if (!a.value.trim() || !t.value.trim()) { toast('Name and comment are both required.', true); return; }
+        c.author = a.value.trim(); c.initials = initialsOf(c.author); c.text = t.value.trim();
+        state.editingId = null;
+        saveComments(); refreshAuthors(); renderComments();
+      };
+      tools.append(cancel, save);
+      card.append(a, t, tools);
+      setTimeout(() => t.focus(), 0);
+    } else {
+      const txt = document.createElement('div');
+      txt.className = 'text';
+      txt.textContent = c.text;
+      card.appendChild(txt);
+      if (!c.ext) {
+        const tools = document.createElement('div'); tools.className = 'tools';
+        const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'link'; edit.textContent = 'Edit';
+        const del = document.createElement('button'); del.type = 'button'; del.className = 'link danger'; del.textContent = 'Delete';
+        edit.onclick = e => { e.stopPropagation(); state.editingId = c.id; renderComments(); };
+        del.onclick = e => {
+          e.stopPropagation();
+          if (!confirm('Delete this comment?')) return;
+          state.comments = state.comments.filter(x => x.id !== c.id);
+          if (state.activeId === c.id) state.activeId = null;
+          saveComments(); renderComments(); paintHighlights();
+        };
+        tools.append(edit, del);
+        card.appendChild(tools);
+      }
+    }
+    card.addEventListener('click', () => setActive(c.id, true));
+    return card;
+  }
+
+  function setActive(id, scrollDoc) {
+    state.activeId = id;
+    document.querySelectorAll('.card').forEach(el => el.classList.toggle('active', el.dataset.id === id));
+    paintHighlights();
+    const c = allComments().find(x => x.id === id);
+    if (scrollDoc && c && c.start && tSpans[c.start.ti]) {
+      if (window.matchMedia('(max-width: 719px)').matches) setView('doc');
+      tSpans[c.start.ti].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  // ---------- loading documents ----------
+  async function loadCustomerDoc(name, buffer, fromStorage) {
+    let opened;
+    try {
+      opened = await openDocx(buffer);
+    } catch (err) {
+      toast(err.message || 'Could not open that file. Please use a .docx Word document.', true);
+      return;
+    }
+    const walked = walkDocument(opened.xml);
+    const texts = walked.tEls.map(t => t.textContent);
+    const existing = await readExistingComments(opened.zip, opened.commentsPath, walked.anchors, texts, walked.paraOf);
+    state.doc = { name, size: buffer.byteLength, buffer, texts, paraOf: walked.paraOf, existing, blocks: walked.blocks };
+    state.pending = null;
+    state.activeId = null;
+    state.editingId = null;
+
+    const body = $('docBody');
+    body.textContent = '';
+    const page = document.createElement('div');
+    page.className = 'page';
+    page.id = 'docView';
+    tSpans = [];
+    renderBlocks(walked.blocks, page, tSpans);
+    body.appendChild(page);
+    $('docName').textContent = name;
+    $('docReplace').hidden = false;
+
+    const saved = await store.get(commentsKey());
+    state.comments = Array.isArray(saved) ? saved.filter(c => c.start && c.end && c.end.ti < texts.length) : [];
+    if (!fromStorage) await store.set('doc', { name, buffer });
+
+    updateComposer();
+    refreshAuthors();
+    renderComments();
+    paintHighlights();
+    if (!fromStorage) toast(`Loaded ${name}` + (existing.length ? ` with ${existing.length} existing comment(s)` : ''));
+  }
+
+  async function loadSource(name, buffer, fromStorage) {
+    const body = $('sourceBody');
+    const isPdf = /\.pdf$/i.test(name) || new Uint8Array(buffer.slice(0, 4)).every((b, i) => b === [0x25, 0x50, 0x44, 0x46][i]);
+    try {
+      if (isPdf) {
+        if (!window.pdfjsLib) throw new Error('The PDF viewer could not load. Check your internet connection.');
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
+        body.textContent = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'pdf-pages';
+        body.appendChild(wrap);
+        const dpr = window.devicePixelRatio || 1;
+        for (let n = 1; n <= pdf.numPages; n++) {
+          const pg = await pdf.getPage(n);
+          const base = pg.getViewport({ scale: 1 });
+          const scale = Math.min(2, 816 / base.width) * dpr;
+          const vp = pg.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.floor(vp.width);
+          canvas.height = Math.floor(vp.height);
+          canvas.setAttribute('aria-label', `Page ${n}`);
+          wrap.appendChild(canvas);
+          await pg.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        }
+      } else {
+        const opened = await openDocx(buffer);
+        const walked = walkDocument(opened.xml);
+        body.textContent = '';
+        const page = document.createElement('div');
+        page.className = 'page';
+        renderBlocks(walked.blocks, page, null);
+        body.appendChild(page);
+      }
+    } catch (err) {
+      toast(err.message || 'Could not open the source document.', true);
+      return;
+    }
+    $('sourceName').textContent = name;
+    $('sourceReplace').hidden = false;
+    if (!fromStorage) await store.set('source', { name, buffer });
+  }
+
+  function commentsKey() { return `comments:${state.doc.name}:${state.doc.size}`; }
+  function saveComments() { if (state.doc) store.set(commentsKey(), state.comments); }
+
+  // ---------- selection → anchor ----------
+  function offsetIn(span, node, off) {
+    const r = document.createRange();
+    r.setStart(span, 0);
+    r.setEnd(node, off);
+    return r.toString().length;
+  }
+
+  function anchorFromSelection() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !state.doc) return null;
+    const range = sel.getRangeAt(0);
+    const view = $('docView');
+    if (!view || !view.contains(range.commonAncestorContainer)) return null;
+    const texts = state.doc.texts;
+    let first = -1, last = -1;
+    for (let i = 0; i < tSpans.length; i++) {
+      if (range.intersectsNode(tSpans[i])) { if (first < 0) first = i; last = i; }
+    }
+    if (first < 0) return null;
+    let sOff = tSpans[first].contains(range.startContainer) ? offsetIn(tSpans[first], range.startContainer, range.startOffset) : 0;
+    let eOff = tSpans[last].contains(range.endContainer) ? offsetIn(tSpans[last], range.endContainer, range.endOffset) : texts[last].length;
+    while (first < last && sOff >= texts[first].length) { first++; sOff = 0; }
+    while (last > first && eOff <= 0) { last--; eOff = texts[last].length; }
+    if (first === last && sOff >= eOff) return null;
+    const start = { ti: first, off: sOff }, end = { ti: last, off: eOff };
+    const quote = quoteOf(start, end, texts, state.doc.paraOf);
+    if (!quote) return null;
+    return { start, end, quote };
+  }
+
+  function onSelection() {
+    const btn = $('floatBtn');
+    const a = anchorFromSelection();
+    if (!a) { btn.style.display = 'none'; return; }
+    btn._anchor = a;
+    const rect = window.getSelection().getRangeAt(0).getBoundingClientRect();
+    btn.style.display = 'block';
+    const bw = btn.offsetWidth, bh = btn.offsetHeight;
+    let top = rect.bottom + 8;
+    if (top + bh > window.innerHeight - 8) top = rect.top - bh - 8;
+    const left = Math.max(8, Math.min(window.innerWidth - bw - 8, rect.left + rect.width / 2 - bw / 2));
+    btn.style.top = Math.max(8, top) + 'px';
+    btn.style.left = left + 'px';
+  }
+
+  function beginComment(anchor) {
+    state.pending = anchor;
+    $('floatBtn').style.display = 'none';
+    window.getSelection().removeAllRanges();
+    updateComposer();
+    paintHighlights();
+    if (window.matchMedia('(max-width: 719px)').matches) setView('comments');
+    $('composerText').focus();
+  }
+
+  function updateComposer() {
+    const p = state.pending;
+    $('composerHint').hidden = !!p;
+    $('composerHint').textContent = state.doc ? 'Select text in the customer document to comment on it.' : 'Load the customer document to start commenting.';
+    $('composerQuote').hidden = !p;
+    $('composerQuote').textContent = p ? p.quote : '';
+    $('composerText').disabled = !p;
+    $('composerAdd').disabled = !p;
+    $('composerCancel').hidden = !p;
+    if (!$('composerAuthor').value) $('composerAuthor').value = $('myName').value;
+  }
+
+  function refreshAuthors() {
+    const names = new Set([$('myName').value.trim(), GENERIC_AUTHOR, ...allComments().map(c => c.author)].filter(Boolean));
+    const dl = $('authorList');
+    dl.textContent = '';
+    for (const n of names) { const o = document.createElement('option'); o.value = n; dl.appendChild(o); }
+  }
+
+  // ---------- saving the .docx with real Word comments ----------
+  function mk(doc, name, attrs) {
+    const el = doc.createElementNS(W, 'w:' + name);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttributeNS(W, 'w:' + k, String(v));
+    return el;
+  }
+  function mkText(doc, text) {
+    const t = mk(doc, 't');
+    t.setAttributeNS(XMLNS, 'xml:space', 'preserve');
+    t.textContent = text;
+    return t;
+  }
+
+  // Returns [parent, beforeNode] for a point inside w:t, splitting the run if needed.
+  function boundaryAt(doc, t, off) {
+    const run = t.parentNode;
+    const text = t.textContent;
+    const content = kids(run).filter(c => !(c.namespaceURI === W && c.localName === 'rPr'));
+    if (off === 0 && content[0] === t) return [run.parentNode, run];
+    if (off === text.length && content[content.length - 1] === t) return [run.parentNode, run.nextSibling];
+    const second = run.cloneNode(false);
+    const rPr = kid(run, 'rPr');
+    if (rPr) second.appendChild(rPr.cloneNode(true));
+    if (off < text.length) second.appendChild(mkText(doc, text.slice(off)));
+    let sib = t.nextSibling;
+    while (sib) { const next = sib.nextSibling; second.appendChild(sib); sib = next; }
+    if (off === 0) run.removeChild(t);
+    else { t.textContent = text.slice(0, off); t.setAttributeNS(XMLNS, 'xml:space', 'preserve'); }
+    run.parentNode.insertBefore(second, run.nextSibling);
+    return [run.parentNode, second];
+  }
+
+  async function exportDocx() {
+    if (!state.doc) return;
+    if (!state.comments.length && !confirm('There are no new comments. Save the document anyway?')) return;
+    $('exportBtn').disabled = true;
+    try {
+      const { zip, mainPath, xml, commentsPath: foundPath } = await openDocx(state.doc.buffer);
+      const walked = walkDocument(xml);
+      if (walked.tEls.length !== state.doc.texts.length) throw new Error('The document changed unexpectedly. Please reload it.');
+
+      // comments part
+      let commentsPath = foundPath;
+      let cx;
+      if (commentsPath && zip.file(commentsPath)) {
+        cx = parseXml(await zip.file(commentsPath).async('string'));
+      } else {
+        commentsPath = dirOf(mainPath) + 'comments.xml';
+        cx = parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments xmlns:w="${W}" xmlns:r="${R}"></w:comments>`);
+        await addCommentsRelationship(zip, mainPath, commentsPath);
+      }
+      let nextId = 0;
+      for (const c of cx.getElementsByTagNameNS(W, 'comment')) nextId = Math.max(nextId, (+wAttr(c, 'id') || 0) + 1);
+      for (const name of ['commentRangeStart', 'commentRangeEnd', 'commentReference']) {
+        for (const c of xml.getElementsByTagNameNS(W, name)) nextId = Math.max(nextId, (+wAttr(c, 'id') || 0) + 1);
+      }
+
+      const ordered = state.comments.slice().sort((a, b) => (a.start.ti - b.start.ti) || (a.start.off - b.start.off));
+      const points = [];
+      for (const c of ordered) {
+        const wid = nextId++;
+        const date = new Date(c.created || Date.now()).toISOString().replace(/\.\d+Z$/, 'Z');
+        const comment = mk(cx, 'comment', { id: wid, author: c.author, date, initials: c.initials });
+        c.text.split('\n').forEach((line, i) => {
+          const p = mk(cx, 'p');
+          if (i === 0) { const r = mk(cx, 'r'); r.appendChild(mk(cx, 'annotationRef')); p.appendChild(r); }
+          const r = mk(cx, 'r');
+          r.appendChild(mkText(cx, line));
+          p.appendChild(r);
+          comment.appendChild(p);
+        });
+        cx.documentElement.appendChild(comment);
+        points.push({ ...c.start, kind: 'start', wid });
+        points.push({ ...c.end, kind: 'end', wid });
+      }
+
+      // Insert markers from the end of the document backwards so earlier positions stay valid.
+      const groups = new Map();
+      for (const p of points) {
+        const k = p.ti + ':' + p.off;
+        if (!groups.has(k)) groups.set(k, { ti: p.ti, off: p.off, list: [] });
+        groups.get(k).list.push(p);
+      }
+      const sorted = [...groups.values()].sort((a, b) => (b.ti - a.ti) || (b.off - a.off));
+      for (const g of sorted) {
+        const [parent, before] = boundaryAt(xml, walked.tEls[g.ti], g.off);
+        const nodes = [];
+        for (const p of g.list.filter(p => p.kind === 'end')) {
+          nodes.push(mk(xml, 'commentRangeEnd', { id: p.wid }));
+          const r = mk(xml, 'r');
+          r.appendChild(mk(xml, 'commentReference', { id: p.wid }));
+          nodes.push(r);
+        }
+        for (const p of g.list.filter(p => p.kind === 'start')) nodes.push(mk(xml, 'commentRangeStart', { id: p.wid }));
+        for (const n of nodes) parent.insertBefore(n, before);
+      }
+
+      zip.file(mainPath, serialize(xml));
+      zip.file(commentsPath, serialize(cx));
+      const blob = await zip.generateAsync({ type: 'blob', mimeType: DOCX_MIME, compression: 'DEFLATE' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = state.doc.name.replace(/\.docx$/i, '') + ' - reviewed.docx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      toast(`Saved with ${state.comments.length} new comment(s).`);
+    } catch (err) {
+      console.error(err);
+      toast(err.message || 'Saving failed.', true);
+    } finally {
+      $('exportBtn').disabled = !state.doc;
+    }
+  }
+
+  async function addCommentsRelationship(zip, mainPath, commentsPath) {
+    const relsPath = relsPathFor(mainPath);
+    const rd = zip.file(relsPath)
+      ? parseXml(await zip.file(relsPath).async('string'))
+      : parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PKG}"></Relationships>`);
+    const ids = new Set(Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).map(r => r.getAttribute('Id')));
+    let n = 1;
+    while (ids.has('rIdComments' + n)) n++;
+    const rel = rd.createElementNS(PKG, 'Relationship');
+    rel.setAttribute('Id', 'rIdComments' + n);
+    rel.setAttribute('Type', REL_COMMENTS);
+    rel.setAttribute('Target', commentsPath.slice(dirOf(mainPath).length));
+    rd.documentElement.appendChild(rel);
+    zip.file(relsPath, serialize(rd));
+
+    const ct = parseXml(await zip.file('[Content_Types].xml').async('string'));
+    const has = Array.from(ct.getElementsByTagNameNS(CT, 'Override')).some(o => o.getAttribute('PartName') === '/' + commentsPath);
+    if (!has) {
+      const o = ct.createElementNS(CT, 'Override');
+      o.setAttribute('PartName', '/' + commentsPath);
+      o.setAttribute('ContentType', COMMENTS_CT);
+      ct.documentElement.appendChild(o);
+      zip.file('[Content_Types].xml', serialize(ct));
+    }
+  }
+
+  // ---------- UI wiring ----------
+  function setView(v) {
+    mainEl.dataset.view = v;
+    document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+  }
+  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+
+  function wireDrop(panelBody, input, handler) {
+    panelBody.addEventListener('click', e => { if (e.target.closest('.pick')) input.click(); });
+    panelBody.addEventListener('dragover', e => {
+      e.preventDefault();
+      const d = panelBody.querySelector('.drop');
+      if (d) d.classList.add('over');
+    });
+    panelBody.addEventListener('dragleave', () => { const d = panelBody.querySelector('.drop'); if (d) d.classList.remove('over'); });
+    panelBody.addEventListener('drop', async e => {
+      e.preventDefault();
+      const d = panelBody.querySelector('.drop');
+      if (d) d.classList.remove('over');
+      const f = e.dataTransfer.files[0];
+      if (f) handler(f.name, await f.arrayBuffer());
+    });
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      input.value = '';
+      if (f) handler(f.name, await f.arrayBuffer());
+    });
+  }
+  wireDrop($('docBody'), $('docFile'), (name, buf) => {
+    if (!/\.docx$/i.test(name)) { toast('The customer document must be a Word .docx file.', true); return; }
+    loadCustomerDoc(name, buf, false);
+  });
+  wireDrop($('sourceBody'), $('sourceFile'), (name, buf) => loadSource(name, buf, false));
+  $('docReplace').onclick = () => $('docFile').click();
+  $('sourceReplace').onclick = () => $('sourceFile').click();
+
+  document.addEventListener('mouseup', () => setTimeout(onSelection, 0));
+  document.addEventListener('keyup', e => { if (e.shiftKey || e.key.startsWith('Arrow')) onSelection(); });
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(onSelection.t);
+    onSelection.t = setTimeout(onSelection, 250);
+  });
+  $('docBody').addEventListener('scroll', () => { $('floatBtn').style.display = 'none'; });
+  $('floatBtn').addEventListener('mousedown', e => e.preventDefault());
+  $('floatBtn').addEventListener('click', () => { if ($('floatBtn')._anchor) beginComment($('floatBtn')._anchor); });
+
+  $('docBody').addEventListener('click', e => {
+    const m = e.target.closest('mark.hl');
+    if (!m || !window.getSelection().isCollapsed) return;
+    const id = m.dataset.ids.split(' ').find(x => x !== 'pending');
+    if (!id) return;
+    setActive(id, false);
+    const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+    if (window.matchMedia('(max-width: 719px)').matches) setView('comments');
+    if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+
+  $('composer').addEventListener('submit', e => {
+    e.preventDefault();
+    const p = state.pending;
+    const author = $('composerAuthor').value.trim();
+    const text = $('composerText').value.trim();
+    if (!p) return;
+    if (!author) { toast('Enter the name this comment is from.', true); $('composerAuthor').focus(); return; }
+    if (!text) { toast('Write a comment first.', true); $('composerText').focus(); return; }
+    const c = {
+      id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      author, initials: initialsOf(author), text,
+      created: new Date().toISOString(),
+      start: p.start, end: p.end, quote: p.quote,
+    };
+    state.comments.push(c);
+    state.pending = null;
+    state.activeId = c.id;
+    $('composerText').value = '';
+    saveComments();
+    refreshAuthors();
+    updateComposer();
+    renderComments();
+    paintHighlights();
+  });
+  $('composerCancel').addEventListener('click', () => {
+    state.pending = null;
+    $('composerText').value = '';
+    updateComposer();
+    paintHighlights();
+  });
+  $('composerText').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('composer').requestSubmit();
+  });
+
+  $('myName').addEventListener('change', () => {
+    const v = $('myName').value.trim();
+    store.set('settings', { name: v });
+    if (!$('composerAuthor').value || $('composerAuthor').dataset.auto === '1') {
+      $('composerAuthor').value = v;
+      $('composerAuthor').dataset.auto = '1';
+    }
+    refreshAuthors();
+  });
+  $('composerAuthor').addEventListener('input', () => { $('composerAuthor').dataset.auto = '0'; });
+  $('exportBtn').addEventListener('click', exportDocx);
+
+  // ---------- restore last session ----------
+  (async () => {
+    const settings = await store.get('settings');
+    if (settings && settings.name) {
+      $('myName').value = settings.name;
+      $('composerAuthor').value = settings.name;
+      $('composerAuthor').dataset.auto = '1';
+    }
+    refreshAuthors();
+    updateComposer();
+    renderComments();
+    const src = await store.get('source');
+    if (src) loadSource(src.name, src.buffer, true);
+    const doc = await store.get('doc');
+    if (doc) await loadCustomerDoc(doc.name, doc.buffer, true);
+  })();
+})();
+</script>
+</body>
+</html>

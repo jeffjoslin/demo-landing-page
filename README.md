@@ -22,3 +22,22 @@ Open index.html in your browser
 python3 -m http.server 8000
 ```
 Then visit http://localhost:8000
+
+## Document Review (`review.html`)
+
+Review a customer's Word document against your source document and save your
+comments into their file as real Word margin comments.
+
+1. Open `review.html` in a browser (needs internet access to load JSZip and PDF.js).
+2. Enter your name at the top.
+3. Load your **source document** (PDF or .docx) on the left. It is for reference only.
+4. Load the **customer document** (.docx) in the middle. This is the file comments are saved into.
+   Comments already in the file are listed as "In document".
+5. Select text in the customer document, click **Comment**, choose who the comment is from
+   (your name, a colleague, or "Review Team"), and add it. Comments can be edited or deleted.
+6. Click **Save Word document** to download `<name> - reviewed.docx`. Each comment appears in
+   Word's margin on the exact text selected, with the author's name, initials and date.
+   The rest of the document is left unchanged.
+
+Documents and comments are kept in the browser (IndexedDB), so reloading the page
+restores your work. Nothing is uploaded to a server.
