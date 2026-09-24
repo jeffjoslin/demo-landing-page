@@ -203,6 +203,15 @@
   .badge { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
   .card.ext .badge { background: #eef1f5; color: #475569; }
   .card .text { white-space: pre-wrap; word-wrap: break-word; }
+  .card.resolved { background: #f8faf9; }
+  .card.resolved .badge { background: #e6f4ea; color: #1e7a3c; }
+  .card.resolved .text, .card.resolved .quote { color: var(--muted); }
+  .replies { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .replies-label { color: var(--muted); font-size: 12px; }
+  .reply { padding-left: 12px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+  .reply .avatar { width: 22px; height: 22px; font-size: 10px; background: #94a3b8; }
+  .list-head label { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; cursor: pointer; }
+  mark.hl.resolved { background: transparent; border-bottom: 2px dashed #9ccfaa; }
   .card .tools { display: flex; gap: 4px; justify-content: flex-end; }
   .empty { color: var(--muted); text-align: center; padding: 20px 8px; font-size: 13px; }
 
@@ -304,7 +313,10 @@
           </div>
       </form>
       <div class="panel-body">
-        <div class="list-head"><span>In this document</span><span id="listCount"></span></div>
+        <div class="list-head">
+          <span>In this document <span id="listCount"></span></span>
+          <label id="resolvedToggle" hidden><input type="checkbox" id="showResolved" checked> Show resolved</label>
+        </div>
         <div id="commentList"><div class="empty">No comments yet.</div></div>
       </div>
     </aside>
@@ -323,7 +335,10 @@
   const XMLNS = 'http://www.w3.org/XML/1998/namespace';
   const REL_DOC = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
   const REL_COMMENTS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
-  const COMMENTS_CT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
+  const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
+  const W15 = 'http://schemas.microsoft.com/office/word/2012/wordml';
+  const REL_COMMENTS_EXT = 'http://schemas.microsoft.com/office/2011/relationships/commentsExtended';
+  const COMMENTS_CT ='application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
   const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   const GENERIC_AUTHOR = 'Review Team';
 
@@ -378,6 +393,7 @@
     pending: null,    // anchor awaiting a comment
     activeId: null,
     editingId: null,
+    showResolved: true,
   };
   let tSpans = [];
 
@@ -434,15 +450,16 @@
     const main = zip.file(mainPath);
     if (!main) throw new Error('This file does not look like a Word document.');
     const xml = parseXml(await main.async('string'));
-    const commentsPath = await findCommentsPath(zip, mainPath);
-    return { zip, mainPath, xml, commentsPath };
+    const commentsPath = await findRelPath(zip, mainPath, REL_COMMENTS);
+    const extendedPath = await findRelPath(zip, mainPath, REL_COMMENTS_EXT);
+    return { zip, mainPath, xml, commentsPath, extendedPath };
   }
 
-  async function findCommentsPath(zip, mainPath) {
+  async function findRelPath(zip, mainPath, type) {
     const relsFile = zip.file(relsPathFor(mainPath));
     if (!relsFile) return null;
     const rd = parseXml(await relsFile.async('string'));
-    const rel = Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).find(r => r.getAttribute('Type') === REL_COMMENTS);
+    const rel = Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).find(r => r.getAttribute('Type') === type);
     return rel ? resolvePath(mainPath, rel.getAttribute('Target')) : null;
   }
 
@@ -526,15 +543,34 @@
     return { blocks: out, tEls, paraOf, anchors };
   }
 
-  async function readExistingComments(zip, commentsPath, anchors, texts, paraOf) {
+  // Replies and resolved state live in commentsExtended.xml, keyed by the paraId
+  // of each comment's last paragraph.
+  async function readExistingComments(opened, anchors, texts, paraOf) {
+    const { zip, commentsPath, extendedPath } = opened;
     if (!commentsPath || !zip.file(commentsPath)) return [];
     const cx = parseXml(await zip.file(commentsPath).async('string'));
-    return Array.from(cx.getElementsByTagNameNS(W, 'comment')).map(c => {
+    const ext = {};
+    if (extendedPath && zip.file(extendedPath)) {
+      const ex = parseXml(await zip.file(extendedPath).async('string'));
+      for (const e of ex.getElementsByTagNameNS(W15, 'commentEx')) {
+        ext[e.getAttributeNS(W15, 'paraId')] = {
+          parent: e.getAttributeNS(W15, 'paraIdParent') || null,
+          done: ['1', 'true'].includes(e.getAttributeNS(W15, 'done')),
+        };
+      }
+    }
+    const list = Array.from(cx.getElementsByTagNameNS(W, 'comment')).map(c => {
       const id = wAttr(c, 'id');
-      const text = Array.from(c.getElementsByTagNameNS(W, 'p'))
-        .map(p => Array.from(p.getElementsByTagNameNS(W, 't')).map(t => t.textContent).join('')).join('\n');
+      const paras = Array.from(c.getElementsByTagNameNS(W, 'p'));
+      const text = paras.map(p => Array.from(p.getElementsByTagNameNS(W, 't')).map(t => t.textContent).join('')).join('\n');
+      const paraId = paras.length ? paras[paras.length - 1].getAttributeNS(W14, 'paraId') : '';
+      const info = ext[paraId] || {};
       const a = anchors[id];
       return {
+        paraId,
+        parentParaId: info.parent || null,
+        done: !!info.done,
+        replies: [],
         id: 'ext-' + id,
         ext: true,
         author: wAttr(c, 'author') || 'Unknown',
@@ -546,6 +582,22 @@
         quote: a ? quoteOf(a.start, a.end, texts, paraOf) : '',
       };
     });
+    const byPara = new Map(list.filter(c => c.paraId).map(c => [c.paraId, c]));
+    const rootOf = c => {
+      const seen = new Set();
+      while (c.parentParaId && byPara.has(c.parentParaId) && !seen.has(c)) { seen.add(c); c = byPara.get(c.parentParaId); }
+      return c;
+    };
+    for (const c of list) {
+      const root = rootOf(c);
+      if (root !== c) { c.parentId = root.id; root.replies.push(c); }
+    }
+    for (const c of list) {
+      if (c.parentId) continue;
+      c.resolved = c.done || c.replies.some(r => r.done);
+      c.replies.sort((x, y) => String(x.created || '').localeCompare(String(y.created || '')));
+    }
+    return list;
   }
 
   function quoteOf(start, end, texts, paraOf) {
@@ -593,6 +645,7 @@
   }
 
   function allComments() { return state.doc ? [...state.doc.existing, ...state.comments] : []; }
+  function threads() { return allComments().filter(c => !c.parentId && (state.showResolved || !c.resolved)); }
 
   function paintHighlights() {
     if (!state.doc) return;
@@ -608,7 +661,7 @@
         byTi.get(ti).push({ a, b, id: c.id, cls });
       }
     };
-    for (const c of allComments()) push(c, c.ext ? 'ext' : '');
+    for (const c of threads()) push(c, c.resolved ? 'resolved' : c.ext ? 'ext' : '');
     if (state.pending) push({ ...state.pending, id: 'pending' }, 'pending');
 
     tSpans.forEach((span, ti) => {
@@ -631,7 +684,8 @@
         const pending = cover.find(v => v.cls === 'pending');
         if (pending) mk.classList.add('pending');
         else {
-          if (cover.every(v => v.cls === 'ext')) mk.classList.add('ext');
+          if (cover.every(v => v.cls === 'resolved')) mk.classList.add('resolved');
+          else if (cover.every(v => v.cls !== '')) mk.classList.add('ext');
           if (cover.length > 1) mk.classList.add('multi');
           if (cover.some(v => v.id === state.activeId)) mk.classList.add('active');
         }
@@ -644,33 +698,34 @@
   function renderComments() {
     const list = $('commentList');
     list.textContent = '';
-    const all = allComments().slice().sort((a, b) => {
+    const all = threads().sort((a, b) => {
       const pa = a.start ? a.start.ti * 1e6 + a.start.off : Infinity;
       const pb = b.start ? b.start.ti * 1e6 + b.start.off : Infinity;
       return pa - pb;
     });
-    const nNew = state.comments.length, nExt = state.doc ? state.doc.existing.length : 0;
+    const existingThreads = state.doc ? state.doc.existing.filter(c => !c.parentId) : [];
+    const nResolved = existingThreads.filter(c => c.resolved).length;
+    const nNew = state.comments.length;
     $('listCount').textContent = all.length ? String(all.length) : '';
     document.querySelector('nav.tabs .count').textContent = all.length ? `(${all.length})` : '';
     $('commentSummary').textContent = !state.doc ? 'No document loaded'
-      : `${nNew} new · ${nExt} already in document`;
+      : `${nNew} new · ${existingThreads.length} in document` + (nResolved ? ` (${nResolved} resolved)` : '');
+    $('resolvedToggle').hidden = !nResolved;
     $('exportBtn').disabled = !state.doc;
 
     if (!all.length) {
       const e = document.createElement('div');
       e.className = 'empty';
-      e.textContent = state.doc ? 'No comments yet. Select text in the document to add one.' : 'Load the customer document to start.';
+      e.textContent = !state.doc ? 'Load the customer document to start.'
+        : nResolved && !state.showResolved ? 'All comments are resolved. Turn on "Show resolved" to see them.'
+        : 'No comments yet. Select text in the document to add one.';
       list.appendChild(e);
       return;
     }
     for (const c of all) list.appendChild(commentCard(c));
   }
 
-  function commentCard(c) {
-    const card = document.createElement('article');
-    card.className = 'card' + (c.ext ? ' ext' : '') + (c.id === state.activeId ? ' active' : '');
-    card.dataset.id = c.id;
-
+  function authorLine(c, badge) {
     const who = document.createElement('div');
     who.className = 'who';
     const av = document.createElement('div');
@@ -680,11 +735,20 @@
     const n = document.createElement('div'); n.className = 'name'; n.textContent = c.author;
     const d = document.createElement('div'); d.className = 'date'; d.textContent = fmtDate(c.created);
     nm.append(n, d);
+    who.append(av, nm);
+    if (badge) who.appendChild(badge);
+    return who;
+  }
+
+  function commentCard(c) {
+    const card = document.createElement('article');
+    card.className = 'card' + (c.ext ? ' ext' : '') + (c.resolved ? ' resolved' : '') + (c.id === state.activeId ? ' active' : '');
+    card.dataset.id = c.id;
+
     const badge = document.createElement('span');
     badge.className = 'badge';
-    badge.textContent = c.ext ? 'In document' : 'New';
-    who.append(av, nm, badge);
-    card.appendChild(who);
+    badge.textContent = c.resolved ? 'Resolved' : c.ext ? 'In document' : 'New';
+    card.appendChild(authorLine(c, badge));
 
     if (c.quote) {
       const q = document.createElement('div');
@@ -733,6 +797,25 @@
         card.appendChild(tools);
       }
     }
+    if (c.replies && c.replies.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'replies';
+      const label = document.createElement('div');
+      label.className = 'replies-label';
+      label.textContent = c.replies.length === 1 ? '1 reply' : `${c.replies.length} replies`;
+      wrap.appendChild(label);
+      for (const r of c.replies) {
+        const item = document.createElement('div');
+        item.className = 'reply';
+        item.appendChild(authorLine(r));
+        const t = document.createElement('div');
+        t.className = 'text';
+        t.textContent = r.text;
+        item.appendChild(t);
+        wrap.appendChild(item);
+      }
+      card.appendChild(wrap);
+    }
     card.addEventListener('click', () => setActive(c.id, true));
     return card;
   }
@@ -759,7 +842,7 @@
     }
     const walked = walkDocument(opened.xml);
     const texts = walked.tEls.map(t => t.textContent);
-    const existing = await readExistingComments(opened.zip, opened.commentsPath, walked.anchors, texts, walked.paraOf);
+    const existing = await readExistingComments(opened, walked.anchors, texts, walked.paraOf);
     state.doc = { name, size: buffer.byteLength, buffer, texts, paraOf: walked.paraOf, existing, blocks: walked.blocks };
     state.pending = null;
     state.activeId = null;
@@ -944,7 +1027,7 @@
     if (!state.comments.length && !confirm('There are no new comments. Save the document anyway?')) return;
     $('exportBtn').disabled = true;
     try {
-      const { zip, mainPath, xml, commentsPath: foundPath } = await openDocx(state.doc.buffer);
+      const { zip, mainPath, xml, commentsPath: foundPath, extendedPath } = await openDocx(state.doc.buffer);
       const walked = walkDocument(xml);
       if (walked.tEls.length !== state.doc.texts.length) throw new Error('The document changed unexpectedly. Please reload it.');
 
@@ -964,6 +1047,26 @@
         for (const c of xml.getElementsByTagNameNS(W, name)) nextId = Math.max(nextId, (+wAttr(c, 'id') || 0) + 1);
       }
 
+      // When the file tracks threads, every comment needs its own paraId plus a
+      // commentEx entry, or readers can mis-link existing replies.
+      let ex = null;
+      const usedParaIds = new Set();
+      if (extendedPath && zip.file(extendedPath)) {
+        ex = parseXml(await zip.file(extendedPath).async('string'));
+        for (const d of [xml, cx, ex]) {
+          for (const el of d.getElementsByTagName('*')) {
+            const v = el.getAttributeNS(W14, 'paraId') || el.getAttributeNS(W15, 'paraId');
+            if (v) usedParaIds.add(v.toUpperCase());
+          }
+        }
+      }
+      const newParaId = () => {
+        let v;
+        do { v = Math.floor(Math.random() * 0x7fffffff + 1).toString(16).toUpperCase().padStart(8, '0'); } while (usedParaIds.has(v));
+        usedParaIds.add(v);
+        return v;
+      };
+
       const ordered = state.comments.slice().sort((a, b) => (a.start.ti - b.start.ti) || (a.start.off - b.start.off));
       const points = [];
       for (const c of ordered) {
@@ -978,6 +1081,14 @@
           p.appendChild(r);
           comment.appendChild(p);
         });
+        if (ex) {
+          const pid = newParaId();
+          comment.lastChild.setAttributeNS(W14, 'w14:paraId', pid);
+          const entry = ex.createElementNS(W15, 'w15:commentEx');
+          entry.setAttributeNS(W15, 'w15:paraId', pid);
+          entry.setAttributeNS(W15, 'w15:done', '0');
+          ex.documentElement.appendChild(entry);
+        }
         cx.documentElement.appendChild(comment);
         points.push({ ...c.start, kind: 'start', wid });
         points.push({ ...c.end, kind: 'end', wid });
@@ -1006,6 +1117,7 @@
 
       zip.file(mainPath, serialize(xml));
       zip.file(commentsPath, serialize(cx));
+      if (ex) zip.file(extendedPath, serialize(ex));
       const blob = await zip.generateAsync({ type: 'blob', mimeType: DOCX_MIME, compression: 'DEFLATE' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1151,6 +1263,11 @@
   });
   $('composerAuthor').addEventListener('input', () => { $('composerAuthor').dataset.auto = '0'; });
   $('exportBtn').addEventListener('click', exportDocx);
+  $('showResolved').addEventListener('change', e => {
+    state.showResolved = e.target.checked;
+    renderComments();
+    paintHighlights();
+  });
 
   // ---------- restore last session ----------
   (async () => {

@@ -32,7 +32,9 @@ comments into their file as real Word margin comments.
 2. Enter your name at the top.
 3. Load your **source document** (PDF or .docx) on the left. It is for reference only.
 4. Load the **customer document** (.docx) in the middle. This is the file comments are saved into.
-   Comments already in the file are listed as "In document".
+   Comments already in the file are listed as "In document", with replies shown under
+   the comment they answer. Resolved threads are marked "Resolved" and can be hidden
+   with the "Show resolved" toggle.
 5. Select text in the customer document, click **Comment**, choose who the comment is from
    (your name, a colleague, or "Review Team"), and add it. Comments can be edited or deleted.
 6. Click **Save Word document** to download `<name> - reviewed.docx`. Each comment appears in
