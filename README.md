@@ -37,9 +37,13 @@ comments into their file as real Word margin comments.
    with the "Show resolved" toggle.
 5. Select text in the customer document, click **Comment**, choose who the comment is from
    (your name, a colleague, or "Review Team"), and add it. Comments can be edited or deleted.
+   Any thread (yours or the customer's) can be replied to and resolved or reopened.
 6. Click **Save Word document** to download `<name> - reviewed.docx`. Each comment appears in
    Word's margin on the exact text selected, with the author's name, initials and date.
    The rest of the document is left unchanged.
 
 Documents and comments are kept in the browser (IndexedDB), so reloading the page
 restores your work. Nothing is uploaded to a server.
+
+Full specification and porting guide: [`docs/word-comments-spec.md`](docs/word-comments-spec.md).
+Tests: `tests/review/run.sh`.

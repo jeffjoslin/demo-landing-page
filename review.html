@@ -211,6 +211,13 @@
   .reply { padding-left: 12px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
   .reply .avatar { width: 22px; height: 22px; font-size: 10px; background: #94a3b8; }
   .list-head label { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; cursor: pointer; }
+  .thread-actions { display: flex; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+  .thread-actions button { padding: 4px 10px; font-size: 13px; }
+  .thread-actions button.resolve { color: #1e7a3c; border-color: #b7dfc3; }
+  .inline-form { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .inline-form textarea { min-height: 60px; resize: vertical; }
+  .reply .badge { font-size: 10px; padding: 1px 6px; }
+  .reply .tools { justify-content: flex-start; }
   mark.hl.resolved { background: transparent; border-bottom: 2px dashed #9ccfaa; }
   .card .tools { display: flex; gap: 4px; justify-content: flex-end; }
   .empty { color: var(--muted); text-align: center; padding: 20px 8px; font-size: 13px; }
@@ -338,7 +345,9 @@
   const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
   const W15 = 'http://schemas.microsoft.com/office/word/2012/wordml';
   const REL_COMMENTS_EXT = 'http://schemas.microsoft.com/office/2011/relationships/commentsExtended';
-  const COMMENTS_CT ='application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
+  const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+  const COMMENTS_EXT_CT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml';
+  const COMMENTS_CT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
   const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   const GENERIC_AUTHOR = 'Review Team';
 
@@ -393,6 +402,8 @@
     pending: null,    // anchor awaiting a comment
     activeId: null,
     editingId: null,
+    replyingId: null,
+    resolutions: {},  // thread id -> resolved (only where it differs from the file)
     showResolved: true,
   };
   let tSpans = [];
@@ -645,7 +656,13 @@
   }
 
   function allComments() { return state.doc ? [...state.doc.existing, ...state.comments] : []; }
-  function threads() { return allComments().filter(c => !c.parentId && (state.showResolved || !c.resolved)); }
+  function isResolved(c) { return c.id in state.resolutions ? state.resolutions[c.id] : !!c.resolved; }
+  function threads() { return allComments().filter(c => !c.parentId && (state.showResolved || !isResolved(c))); }
+  function repliesOf(c) {
+    const mine = state.comments.filter(r => r.parentId === c.id)
+      .sort((x, y) => String(x.created).localeCompare(String(y.created)));
+    return [...(c.replies || []), ...mine];
+  }
 
   function paintHighlights() {
     if (!state.doc) return;
@@ -661,7 +678,7 @@
         byTi.get(ti).push({ a, b, id: c.id, cls });
       }
     };
-    for (const c of threads()) push(c, c.resolved ? 'resolved' : c.ext ? 'ext' : '');
+    for (const c of threads()) push(c, isResolved(c) ? 'resolved' : c.ext ? 'ext' : '');
     if (state.pending) push({ ...state.pending, id: 'pending' }, 'pending');
 
     tSpans.forEach((span, ti) => {
@@ -704,12 +721,14 @@
       return pa - pb;
     });
     const existingThreads = state.doc ? state.doc.existing.filter(c => !c.parentId) : [];
-    const nResolved = existingThreads.filter(c => c.resolved).length;
-    const nNew = state.comments.length;
+    const nResolved = allComments().filter(c => !c.parentId && isResolved(c)).length;
+    const nNew = state.comments.filter(c => !c.parentId).length;
+    const nReplies = state.comments.length - nNew;
     $('listCount').textContent = all.length ? String(all.length) : '';
     document.querySelector('nav.tabs .count').textContent = all.length ? `(${all.length})` : '';
     $('commentSummary').textContent = !state.doc ? 'No document loaded'
-      : `${nNew} new · ${existingThreads.length} in document` + (nResolved ? ` (${nResolved} resolved)` : '');
+      : [`${nNew} new`, nReplies ? `${nReplies} repl${nReplies === 1 ? 'y' : 'ies'}` : '', `${existingThreads.length} in document`,
+         nResolved ? `${nResolved} resolved` : ''].filter(Boolean).join(' · ');
     $('resolvedToggle').hidden = !nResolved;
     $('exportBtn').disabled = !state.doc;
 
@@ -740,14 +759,75 @@
     return who;
   }
 
+  function button(label, cls, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.onclick = e => { e.stopPropagation(); onClick(); };
+    return b;
+  }
+
+  // Inline form used for editing a comment/reply and for writing a reply.
+  function commentForm({ author, text, submitLabel, placeholder, onSubmit, onCancel }) {
+    const form = document.createElement('div');
+    form.className = 'inline-form';
+    const a = document.createElement('input');
+    a.type = 'text'; a.value = author; a.setAttribute('list', 'authorList'); a.setAttribute('aria-label', 'Comment as');
+    a.placeholder = 'Name';
+    const t = document.createElement('textarea');
+    t.value = text; t.placeholder = placeholder || ''; t.setAttribute('aria-label', 'Comment');
+    const tools = document.createElement('div'); tools.className = 'tools';
+    const submit = () => {
+      if (!a.value.trim()) { toast('Enter the name this is from.', true); a.focus(); return; }
+      if (!t.value.trim()) { toast('Write something first.', true); t.focus(); return; }
+      onSubmit(a.value.trim(), t.value.trim());
+    };
+    t.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); });
+    tools.append(button('Cancel', '', onCancel), button(submitLabel, 'primary', submit));
+    form.append(a, t, tools);
+    setTimeout(() => t.focus(), 0);
+    return form;
+  }
+
+  function editFormFor(c) {
+    return commentForm({
+      author: c.author, text: c.text, submitLabel: 'Save',
+      onCancel: () => { state.editingId = null; renderComments(); },
+      onSubmit: (author, text) => {
+        c.author = author; c.initials = initialsOf(author); c.text = text;
+        state.editingId = null;
+        saveComments(); refreshAuthors(); renderComments();
+      },
+    });
+  }
+
+  function deleteComment(c) {
+    const replies = state.comments.filter(r => r.parentId === c.id);
+    const msg = replies.length ? `Delete this comment and its ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}?` : 'Delete this?';
+    if (!confirm(msg)) return;
+    state.comments = state.comments.filter(x => x.id !== c.id && x.parentId !== c.id);
+    delete state.resolutions[c.id];
+    if (state.activeId === c.id) state.activeId = null;
+    saveComments(); renderComments(); paintHighlights();
+  }
+
+  function toggleResolved(c) {
+    const next = !isResolved(c);
+    if (next === !!c.resolved) delete state.resolutions[c.id];
+    else state.resolutions[c.id] = next;
+    saveComments(); renderComments(); paintHighlights();
+  }
+
   function commentCard(c) {
+    const resolved = isResolved(c);
     const card = document.createElement('article');
-    card.className = 'card' + (c.ext ? ' ext' : '') + (c.resolved ? ' resolved' : '') + (c.id === state.activeId ? ' active' : '');
+    card.className = 'card' + (c.ext ? ' ext' : '') + (resolved ? ' resolved' : '') + (c.id === state.activeId ? ' active' : '');
     card.dataset.id = c.id;
 
     const badge = document.createElement('span');
     badge.className = 'badge';
-    badge.textContent = c.resolved ? 'Resolved' : c.ext ? 'In document' : 'New';
+    badge.textContent = resolved ? 'Resolved' : c.ext ? 'In document' : 'New';
     card.appendChild(authorLine(c, badge));
 
     if (c.quote) {
@@ -758,24 +838,7 @@
     }
 
     if (state.editingId === c.id) {
-      const a = document.createElement('input');
-      a.type = 'text'; a.value = c.author; a.setAttribute('list', 'authorList'); a.setAttribute('aria-label', 'Author');
-      const t = document.createElement('textarea');
-      t.value = c.text; t.setAttribute('aria-label', 'Comment');
-      const tools = document.createElement('div'); tools.className = 'tools';
-      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
-      const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
-      cancel.onclick = e => { e.stopPropagation(); state.editingId = null; renderComments(); };
-      save.onclick = e => {
-        e.stopPropagation();
-        if (!a.value.trim() || !t.value.trim()) { toast('Name and comment are both required.', true); return; }
-        c.author = a.value.trim(); c.initials = initialsOf(c.author); c.text = t.value.trim();
-        state.editingId = null;
-        saveComments(); refreshAuthors(); renderComments();
-      };
-      tools.append(cancel, save);
-      card.append(a, t, tools);
-      setTimeout(() => t.focus(), 0);
+      card.appendChild(editFormFor(c));
     } else {
       const txt = document.createElement('div');
       txt.className = 'text';
@@ -783,40 +846,78 @@
       card.appendChild(txt);
       if (!c.ext) {
         const tools = document.createElement('div'); tools.className = 'tools';
-        const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'link'; edit.textContent = 'Edit';
-        const del = document.createElement('button'); del.type = 'button'; del.className = 'link danger'; del.textContent = 'Delete';
-        edit.onclick = e => { e.stopPropagation(); state.editingId = c.id; renderComments(); };
-        del.onclick = e => {
-          e.stopPropagation();
-          if (!confirm('Delete this comment?')) return;
-          state.comments = state.comments.filter(x => x.id !== c.id);
-          if (state.activeId === c.id) state.activeId = null;
-          saveComments(); renderComments(); paintHighlights();
-        };
-        tools.append(edit, del);
+        tools.append(
+          button('Edit', 'link', () => { state.editingId = c.id; renderComments(); }),
+          button('Delete', 'link danger', () => deleteComment(c)),
+        );
         card.appendChild(tools);
       }
     }
-    if (c.replies && c.replies.length) {
+
+    const replies = repliesOf(c);
+    if (replies.length) {
       const wrap = document.createElement('div');
       wrap.className = 'replies';
       const label = document.createElement('div');
       label.className = 'replies-label';
-      label.textContent = c.replies.length === 1 ? '1 reply' : `${c.replies.length} replies`;
+      label.textContent = replies.length === 1 ? '1 reply' : `${replies.length} replies`;
       wrap.appendChild(label);
-      for (const r of c.replies) {
+      for (const r of replies) {
         const item = document.createElement('div');
-        item.className = 'reply';
-        item.appendChild(authorLine(r));
-        const t = document.createElement('div');
-        t.className = 'text';
-        t.textContent = r.text;
-        item.appendChild(t);
+        item.className = 'reply' + (r.ext ? '' : ' mine');
+        item.dataset.id = r.id;
+        let tag = null;
+        if (!r.ext) { tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = 'New'; }
+        item.appendChild(authorLine(r, tag));
+        if (state.editingId === r.id) {
+          item.appendChild(editFormFor(r));
+        } else {
+          const t = document.createElement('div');
+          t.className = 'text';
+          t.textContent = r.text;
+          item.appendChild(t);
+          if (!r.ext) {
+            const tools = document.createElement('div'); tools.className = 'tools';
+            tools.append(
+              button('Edit', 'link', () => { state.editingId = r.id; renderComments(); }),
+              button('Delete', 'link danger', () => deleteComment(r)),
+            );
+            item.appendChild(tools);
+          }
+        }
         wrap.appendChild(item);
       }
       card.appendChild(wrap);
     }
-    card.addEventListener('click', () => setActive(c.id, true));
+
+    if (state.replyingId === c.id) {
+      card.appendChild(commentForm({
+        author: $('myName').value.trim(), text: '', submitLabel: 'Reply', placeholder: 'Write a reply…',
+        onCancel: () => { state.replyingId = null; renderComments(); },
+        onSubmit: (author, text) => {
+          state.comments.push({
+            id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+            parentId: c.id, author, initials: initialsOf(author), text,
+            created: new Date().toISOString(),
+          });
+          state.replyingId = null;
+          saveComments(); refreshAuthors(); renderComments();
+        },
+      }));
+    } else if (state.editingId !== c.id) {
+      const actions = document.createElement('div');
+      actions.className = 'thread-actions';
+      actions.append(
+        button('Reply', '', () => { state.replyingId = c.id; state.editingId = null; renderComments(); }),
+        button(resolved ? 'Reopen' : 'Resolve', resolved ? '' : 'resolve', () => toggleResolved(c)),
+      );
+      card.appendChild(actions);
+    }
+
+    card.addEventListener('click', e => {
+      if (e.target.closest('input, textarea, button')) return;
+      setActive(c.id, true);
+    });
     return card;
   }
 
@@ -860,7 +961,15 @@
     $('docReplace').hidden = false;
 
     const saved = await store.get(commentsKey());
-    state.comments = Array.isArray(saved) ? saved.filter(c => c.start && c.end && c.end.ti < texts.length) : [];
+    const savedList = Array.isArray(saved) ? saved : (saved && saved.comments) || [];
+    const tops = savedList.filter(c => !c.parentId && c.start && c.end && c.end.ti < texts.length);
+    const parentIds = new Set([...existing.map(c => c.id), ...tops.map(c => c.id)]);
+    state.comments = [...tops, ...savedList.filter(c => c.parentId && parentIds.has(c.parentId))];
+    state.resolutions = {};
+    for (const [id, v] of Object.entries((saved && !Array.isArray(saved) && saved.resolutions) || {})) {
+      if (parentIds.has(id)) state.resolutions[id] = v;
+    }
+    state.replyingId = null;
     if (!fromStorage) await store.set('doc', { name, buffer });
 
     updateComposer();
@@ -913,7 +1022,7 @@
   }
 
   function commentsKey() { return `comments:${state.doc.name}:${state.doc.size}`; }
-  function saveComments() { if (state.doc) store.set(commentsKey(), state.comments); }
+  function saveComments() { if (state.doc) store.set(commentsKey(), { comments: state.comments, resolutions: state.resolutions }); }
 
   // ---------- selection → anchor ----------
   function offsetIn(span, node, off) {
@@ -1024,14 +1133,14 @@
 
   async function exportDocx() {
     if (!state.doc) return;
-    if (!state.comments.length && !confirm('There are no new comments. Save the document anyway?')) return;
+    const nChanges = state.comments.length + Object.keys(state.resolutions).length;
+    if (!nChanges && !confirm('There are no changes. Save the document anyway?')) return;
     $('exportBtn').disabled = true;
     try {
-      const { zip, mainPath, xml, commentsPath: foundPath, extendedPath } = await openDocx(state.doc.buffer);
+      const { zip, mainPath, xml, commentsPath: foundPath, extendedPath: foundExPath } = await openDocx(state.doc.buffer);
       const walked = walkDocument(xml);
       if (walked.tEls.length !== state.doc.texts.length) throw new Error('The document changed unexpectedly. Please reload it.');
 
-      // comments part
       let commentsPath = foundPath;
       let cx;
       if (commentsPath && zip.file(commentsPath)) {
@@ -1039,7 +1148,7 @@
       } else {
         commentsPath = dirOf(mainPath) + 'comments.xml';
         cx = parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments xmlns:w="${W}" xmlns:r="${R}"></w:comments>`);
-        await addCommentsRelationship(zip, mainPath, commentsPath);
+        await addPart(zip, mainPath, commentsPath, REL_COMMENTS, COMMENTS_CT);
       }
       let nextId = 0;
       for (const c of cx.getElementsByTagNameNS(W, 'comment')) nextId = Math.max(nextId, (+wAttr(c, 'id') || 0) + 1);
@@ -1047,17 +1156,33 @@
         for (const c of xml.getElementsByTagNameNS(W, name)) nextId = Math.max(nextId, (+wAttr(c, 'id') || 0) + 1);
       }
 
-      // When the file tracks threads, every comment needs its own paraId plus a
-      // commentEx entry, or readers can mis-link existing replies.
+      // Threads and resolved state live in commentsExtended.xml, linked by the
+      // paraId of each comment's last paragraph.
+      const tops = state.comments.filter(c => !c.parentId)
+        .sort((a, b) => (a.start.ti - b.start.ti) || (a.start.off - b.start.off));
+      const replies = state.comments.filter(c => c.parentId)
+        .sort((a, b) => String(a.created).localeCompare(String(b.created)));
+      let extendedPath = foundExPath && zip.file(foundExPath) ? foundExPath : null;
+      const needEx = !!extendedPath || replies.length > 0 || Object.keys(state.resolutions).length > 0;
       let ex = null;
+      if (needEx) {
+        if (extendedPath) {
+          ex = parseXml(await zip.file(extendedPath).async('string'));
+        } else {
+          extendedPath = dirOf(mainPath) + 'commentsExtended.xml';
+          ex = parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w15:commentsEx xmlns:w15="${W15}" xmlns:mc="${MC}" mc:Ignorable="w15"></w15:commentsEx>`);
+          await addPart(zip, mainPath, extendedPath, REL_COMMENTS_EXT, COMMENTS_EXT_CT);
+        }
+        if (!cx.documentElement.hasAttribute('xmlns:w14')) {
+          cx.documentElement.setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:w14', W14);
+        }
+      }
+
       const usedParaIds = new Set();
-      if (extendedPath && zip.file(extendedPath)) {
-        ex = parseXml(await zip.file(extendedPath).async('string'));
-        for (const d of [xml, cx, ex]) {
-          for (const el of d.getElementsByTagName('*')) {
-            const v = el.getAttributeNS(W14, 'paraId') || el.getAttributeNS(W15, 'paraId');
-            if (v) usedParaIds.add(v.toUpperCase());
-          }
+      for (const d of [xml, cx, ex].filter(Boolean)) {
+        for (const el of d.getElementsByTagName('*')) {
+          const v = el.getAttributeNS(W14, 'paraId') || el.getAttributeNS(W15, 'paraId');
+          if (v) usedParaIds.add(v.toUpperCase());
         }
       }
       const newParaId = () => {
@@ -1066,35 +1191,109 @@
         usedParaIds.add(v);
         return v;
       };
+      const exEntries = new Map();
+      if (ex) for (const e of ex.getElementsByTagNameNS(W15, 'commentEx')) exEntries.set(e.getAttributeNS(W15, 'paraId').toUpperCase(), e);
+      const entryFor = pid => {
+        let e = exEntries.get(pid.toUpperCase());
+        if (!e) {
+          e = ex.createElementNS(W15, 'w15:commentEx');
+          e.setAttributeNS(W15, 'w15:paraId', pid);
+          e.setAttributeNS(W15, 'w15:done', '0');
+          ex.documentElement.appendChild(e);
+          exEntries.set(pid.toUpperCase(), e);
+        }
+        return e;
+      };
+      const paraIdOf = commentEl => {
+        const ps = commentEl.getElementsByTagNameNS(W, 'p');
+        let last = ps[ps.length - 1];
+        if (!last) { last = mk(cx, 'p'); commentEl.appendChild(last); }
+        let v = last.getAttributeNS(W14, 'paraId');
+        if (!v) { v = newParaId(); last.setAttributeNS(W14, 'w14:paraId', v); }
+        return v;
+      };
+      const extEls = new Map();
+      for (const c of cx.getElementsByTagNameNS(W, 'comment')) extEls.set(wAttr(c, 'id'), c);
+      if (ex) for (const el of extEls.values()) entryFor(paraIdOf(el));
 
-      const ordered = state.comments.slice().sort((a, b) => (a.start.ti - b.start.ti) || (a.start.off - b.start.off));
-      const points = [];
-      for (const c of ordered) {
+      const built = new Map(); // app comment id -> { wid, el }
+      const build = c => {
         const wid = nextId++;
         const date = new Date(c.created || Date.now()).toISOString().replace(/\.\d+Z$/, 'Z');
-        const comment = mk(cx, 'comment', { id: wid, author: c.author, date, initials: c.initials });
+        const el = mk(cx, 'comment', { id: wid, author: c.author, date, initials: c.initials });
         c.text.split('\n').forEach((line, i) => {
           const p = mk(cx, 'p');
           if (i === 0) { const r = mk(cx, 'r'); r.appendChild(mk(cx, 'annotationRef')); p.appendChild(r); }
           const r = mk(cx, 'r');
           r.appendChild(mkText(cx, line));
           p.appendChild(r);
-          comment.appendChild(p);
+          el.appendChild(p);
         });
-        if (ex) {
-          const pid = newParaId();
-          comment.lastChild.setAttributeNS(W14, 'w14:paraId', pid);
-          const entry = ex.createElementNS(W15, 'w15:commentEx');
-          entry.setAttributeNS(W15, 'w15:paraId', pid);
-          entry.setAttributeNS(W15, 'w15:done', '0');
-          ex.documentElement.appendChild(entry);
-        }
-        cx.documentElement.appendChild(comment);
+        cx.documentElement.appendChild(el);
+        if (ex) entryFor(paraIdOf(el));
+        built.set(c.id, { wid, el });
+        return wid;
+      };
+      const elOf = id => id.startsWith('ext-') ? extEls.get(id.slice(4)) : built.get(id)?.el;
+
+      const points = [];
+      for (const c of tops) {
+        const wid = build(c);
         points.push({ ...c.start, kind: 'start', wid });
         points.push({ ...c.end, kind: 'end', wid });
       }
 
-      // Insert markers from the end of the document backwards so earlier positions stay valid.
+      // Replies share their parent's range, as Word writes them.
+      const afterExt = new Map(); // parent w:id -> { start, ref } insertion cursors
+      for (const r of replies) {
+        const parentEl = elOf(r.parentId);
+        if (!parentEl) continue;
+        const wid = build(r);
+        entryFor(paraIdOf(built.get(r.id).el)).setAttributeNS(W15, 'w15:paraIdParent', paraIdOf(parentEl));
+        const parent = state.comments.find(c => c.id === r.parentId);
+        if (parent) {
+          points.push({ ...parent.start, kind: 'start', wid });
+          points.push({ ...parent.end, kind: 'end', wid });
+          continue;
+        }
+        const pw = r.parentId.slice(4);
+        const find = name => Array.from(xml.getElementsByTagNameNS(W, name)).find(e => wAttr(e, 'id') === pw);
+        let cur = afterExt.get(pw);
+        if (!cur) {
+          const ref = find('commentReference');
+          cur = { start: find('commentRangeStart') || null, ref: ref ? ref.parentNode : find('commentRangeEnd') || null };
+          afterExt.set(pw, cur);
+        }
+        if (!cur.ref) continue;
+        if (cur.start) {
+          const s = mk(xml, 'commentRangeStart', { id: wid });
+          cur.start.parentNode.insertBefore(s, cur.start.nextSibling);
+          cur.start = s;
+        }
+        const nodes = [];
+        if (cur.start) nodes.push(mk(xml, 'commentRangeEnd', { id: wid }));
+        const run = mk(xml, 'r');
+        run.appendChild(mk(xml, 'commentReference', { id: wid }));
+        nodes.push(run);
+        for (const n of nodes) {
+          cur.ref.parentNode.insertBefore(n, cur.ref.nextSibling);
+          cur.ref = n;
+        }
+      }
+
+      // Resolved state is recorded on the thread's first comment and its replies.
+      if (ex) {
+        for (const [id, done] of Object.entries(state.resolutions)) {
+          const thread = allComments().find(c => c.id === id);
+          if (!thread) continue;
+          for (const c of [thread, ...repliesOf(thread)]) {
+            const el = elOf(c.id);
+            if (el) entryFor(paraIdOf(el)).setAttributeNS(W15, 'w15:done', done ? '1' : '0');
+          }
+        }
+      }
+
+      // Insert range markers from the end of the document backwards so earlier positions stay valid.
       const groups = new Map();
       for (const p of points) {
         const k = p.ti + ':' + p.off;
@@ -1126,7 +1325,7 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-      toast(`Saved with ${state.comments.length} new comment(s).`);
+      toast(`Saved: ${tops.length} new comment(s), ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}.`);
     } catch (err) {
       console.error(err);
       toast(err.message || 'Saving failed.', true);
@@ -1135,27 +1334,27 @@
     }
   }
 
-  async function addCommentsRelationship(zip, mainPath, commentsPath) {
+  async function addPart(zip, mainPath, partPath, relType, contentType) {
     const relsPath = relsPathFor(mainPath);
     const rd = zip.file(relsPath)
       ? parseXml(await zip.file(relsPath).async('string'))
       : parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="${PKG}"></Relationships>`);
     const ids = new Set(Array.from(rd.getElementsByTagNameNS(PKG, 'Relationship')).map(r => r.getAttribute('Id')));
     let n = 1;
-    while (ids.has('rIdComments' + n)) n++;
+    while (ids.has('rIdReview' + n)) n++;
     const rel = rd.createElementNS(PKG, 'Relationship');
-    rel.setAttribute('Id', 'rIdComments' + n);
-    rel.setAttribute('Type', REL_COMMENTS);
-    rel.setAttribute('Target', commentsPath.slice(dirOf(mainPath).length));
+    rel.setAttribute('Id', 'rIdReview' + n);
+    rel.setAttribute('Type', relType);
+    rel.setAttribute('Target', partPath.slice(dirOf(mainPath).length));
     rd.documentElement.appendChild(rel);
     zip.file(relsPath, serialize(rd));
 
     const ct = parseXml(await zip.file('[Content_Types].xml').async('string'));
-    const has = Array.from(ct.getElementsByTagNameNS(CT, 'Override')).some(o => o.getAttribute('PartName') === '/' + commentsPath);
+    const has = Array.from(ct.getElementsByTagNameNS(CT, 'Override')).some(o => o.getAttribute('PartName') === '/' + partPath);
     if (!has) {
       const o = ct.createElementNS(CT, 'Override');
-      o.setAttribute('PartName', '/' + commentsPath);
-      o.setAttribute('ContentType', COMMENTS_CT);
+      o.setAttribute('PartName', '/' + partPath);
+      o.setAttribute('ContentType', contentType);
       ct.documentElement.appendChild(o);
       zip.file('[Content_Types].xml', serialize(ct));
     }
